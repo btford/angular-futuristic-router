@@ -1,0 +1,15 @@
+{
+  "name": "exploratory-router-backport",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "apache 2",
+  "dependencies": {
+    "angular-router": "0.0.2",
+    "router": "git://github.com/angular/router"
+  }
+}
