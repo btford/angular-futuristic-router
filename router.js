@@ -5,9 +5,11 @@ factory('router', function () {
   var History = require('router/dist/cjs/history').History;
   var Router = require('router/dist/cjs/router').Router;
   var Pipeline = require('router/dist/cjs/pipeline').Pipeline;
+  var BuildNavigationPlanStep = require('router/dist/cjs/navigationPlan').BuildNavigationPlanStep;
   var CommitChangesStep = require('router/dist/cjs/navigationContext').CommitChangesStep;
 
-  var history = new History()
+  // TODO: use $location instead of History
+  var history = new History();
   var router = new Router(history);
 
   router.activate = function (options) {
@@ -36,7 +38,9 @@ factory('router', function () {
   router.pipelineProvider = {
     createPipeline: function () {
       var pipeline = new Pipeline();
-      pipeline.withStep(CommitChangesStep);
+      pipeline.
+          withStep(new BuildNavigationPlanStep).
+          withStep(new CommitChangesStep);
       return pipeline;
     }
   };
