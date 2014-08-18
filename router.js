@@ -16,7 +16,11 @@ factory('createPipeline', ['$http', function ($http) {
         var url = options.componentUrl;
         return new Promise(function (resolve, reject) {
           //$http.get(url).then(resolve, reject);
-          resolve({ /* ... */ });
+
+          // TODO: figure out what this API should look like
+          resolve({
+            executionContext: {}
+          });
         });
       }
     };
@@ -136,10 +140,18 @@ directive('routerViewPort', function ($location, router) {
 
   var log = console.log.bind(console);
 
+  var elts = [];
+
   router.registerViewPort({
-    process: log,
+    process: function (command) {
+      log(command);
+      log(elts)
+      elts.forEach(function (elt) {
+        elt.html('look it did something');
+      });
+    },
     getComponent: function (opts) {
-      log(opts);
+      //log(opts);
       return opts
     }
   });
@@ -155,7 +167,8 @@ directive('routerViewPort', function ($location, router) {
 
   return {
     restrict: 'AE',
-    link: function () {
+    link: function (scope, elt) {
+      elts.push(elt);
       router.activate({ pushState: true });
     }
   };
