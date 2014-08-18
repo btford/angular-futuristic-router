@@ -1,12 +1,46 @@
 
+var buildNavigationPlan = require('router/dist/cjs/navigationPlan').buildNavigationPlan;
+var REPLACE = require('router/dist/cjs/navigationPlan').REPLACE;
+var Pipeline = require('router/dist/cjs/pipeline').Pipeline;
+
 angular.module('ngFuturisticRouter', []).
 
-factory('router', function () {
-  var History = require('router/dist/cjs/history').History;
-  var Router = require('router/dist/cjs/router').Router;
-  var Pipeline = require('router/dist/cjs/pipeline').Pipeline;
+factory('createPipeline', ['$http', function ($http) {
+
   var BuildNavigationPlanStep = require('router/dist/cjs/navigationPlan').BuildNavigationPlanStep;
   var CommitChangesStep = require('router/dist/cjs/navigationContext').CommitChangesStep;
+
+  function LoadNewComponentsStep (componentLoader) {
+    this.componentLoader = {
+      loadComponent: function (options) {
+        var url = options.componentUrl;
+        return new Promise(function (resolve, reject) {
+          //$http.get(url).then(resolve, reject);
+          resolve({ /* ... */ });
+        });
+      }
+    };
+  }
+
+  LoadNewComponentsStep.prototype.run = function (navigationContext, next) {
+    return loadNewComponents(this.componentLoader, navigationContext).
+        then(next).catch(next.cancel);
+  };
+
+  return function createPipeline () {
+    var pipeline = new Pipeline();
+    pipeline.
+        withStep(new BuildNavigationPlanStep).
+        withStep(new LoadNewComponentsStep).
+        withStep(new CommitChangesStep);
+    return pipeline;
+  };
+
+}]).
+
+factory('router', function (createPipeline) {
+  var History = require('router/dist/cjs/history').History;
+  var Router = require('router/dist/cjs/router').Router;
 
   // TODO: use $location instead of History
   var history = new History();
@@ -36,13 +70,7 @@ factory('router', function () {
   };
 
   router.pipelineProvider = {
-    createPipeline: function () {
-      var pipeline = new Pipeline();
-      pipeline.
-          withStep(new BuildNavigationPlanStep).
-          withStep(new CommitChangesStep);
-      return pipeline;
-    }
+    createPipeline: createPipeline
   };
 
   router.queue = [];
@@ -110,7 +138,10 @@ directive('routerViewPort', function ($location, router) {
 
   router.registerViewPort({
     process: log,
-    getComponent: log
+    getComponent: function (opts) {
+      log(opts);
+      return opts
+    }
   });
 
   router.configure(function (config) {
@@ -129,6 +160,89 @@ directive('routerViewPort', function ($location, router) {
     }
   };
 });
+
+
+function loadNewComponents(componentLoader, navigationContext) {
+  var toLoad = determineWhatToLoad(navigationContext);
+  var loadPromises = toLoad.map(function (current) {
+    return loadComponent(componentLoader, current.navigationContext, current.viewPortPlan);
+  });
+  return Promise.all(loadPromises);
+}
+
+function determineWhatToLoad(navigationContext, toLoad) {
+  var plan = navigationContext.plan;
+  var next = navigationContext.nextInstruction;
+  toLoad = toLoad || [];
+  for (var viewPortName in plan) {
+    var viewPortPlan = plan[viewPortName];
+    if (viewPortPlan.strategy === REPLACE) {
+      toLoad.push({
+        viewPortPlan: viewPortPlan,
+        navigationContext: navigationContext
+      });
+      if (viewPortPlan.childNavigationContext) {
+        determineWhatToLoad(viewPortPlan.childNavigationContext, toLoad);
+      }
+    } else {
+      var viewPortInstruction = next.addViewPortInstruction(viewPortName, viewPortPlan.strategy, viewPortPlan.prevComponentUrl, viewPortPlan.prevComponent);
+      if (viewPortPlan.childNavigationContext) {
+        viewPortInstruction.childNavigationContext = viewPortPlan.childNavigationContext;
+        determineWhatToLoad(viewPortPlan.childNavigationContext, toLoad);
+      }
+    }
+  }
+  return toLoad;
+}
+
+// component-loading utils
+
+function loadComponent(componentLoader, navigationContext, viewPortPlan) {
+  var componentUrl = viewPortPlan.config.componentUrl;
+  var next = navigationContext.nextInstruction;
+  return resolveComponentView(componentLoader, navigationContext.router, viewPortPlan).then(function (component) {
+    var viewPortInstruction = next.addViewPortInstruction(viewPortPlan.name, viewPortPlan.strategy, componentUrl, component);
+    var controller = component.executionContext;
+    if (controller.router) {
+      var path = next.getWildcardPath();
+      return controller.router.createNavigationInstruction(path, next).then(function (childInstruction) {
+        viewPortPlan.childNavigationContext = controller.router.createNavigationContext(childInstruction);
+        return buildNavigationPlan(viewPortPlan.childNavigationContext).then(function (childPlan) {
+          viewPortPlan.childNavigationContext.plan = childPlan;
+          viewPortInstruction.childNavigationContext = viewPortPlan.childNavigationContext;
+          return loadNewComponents(componentLoader, viewPortPlan.childNavigationContext);
+        });
+      });
+    }
+  });
+}
+
+function resolveComponentView(componentLoader, router, viewPortPlan) {
+  var possibleRouterViewPort = router.viewPorts[viewPortPlan.name];
+  return componentLoader.loadComponent(viewPortPlan.config).then(function (directive) {
+    return new Promise(function (resolve, reject) {
+      function createChildRouter() {
+        return router.createChild();
+      }
+      function getComponent(routerViewPort) {
+        try {
+          resolve(routerViewPort.getComponent(directive, createChildRouter));
+        } catch (error) {
+          reject(error);
+        }
+      }
+      if (possibleRouterViewPort) {
+        getComponent(possibleRouterViewPort);
+      } else {
+        router.viewPorts[viewPortPlan.name] = getComponent;
+      }
+    });
+  });
+}
+
+
+// utils
+// -----
 
 function handleLinkClick(ev) {
   if (!this.isActive) {
