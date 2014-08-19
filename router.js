@@ -3,27 +3,17 @@ var buildNavigationPlan = require('router/dist/cjs/navigationPlan').buildNavigat
 var REPLACE = require('router/dist/cjs/navigationPlan').REPLACE;
 var Pipeline = require('router/dist/cjs/pipeline').Pipeline;
 
+var log = console.log.bind(console);
+
 angular.module('ngFuturisticRouter', []).
 
-factory('createPipeline', ['$http', function ($http) {
+factory('createPipeline', function ($http, componentLoader) {
 
   var BuildNavigationPlanStep = require('router/dist/cjs/navigationPlan').BuildNavigationPlanStep;
   var CommitChangesStep = require('router/dist/cjs/navigationContext').CommitChangesStep;
 
-  function LoadNewComponentsStep (componentLoader) {
-    this.componentLoader = {
-      loadComponent: function (options) {
-        var url = options.componentUrl;
-        return new Promise(function (resolve, reject) {
-          //$http.get(url).then(resolve, reject);
-
-          // TODO: figure out what this API should look like
-          resolve({
-            executionContext: {}
-          });
-        });
-      }
-    };
+  function LoadNewComponentsStep () {
+    this.componentLoader = componentLoader;
   }
 
   LoadNewComponentsStep.prototype.run = function (navigationContext, next) {
@@ -34,21 +24,56 @@ factory('createPipeline', ['$http', function ($http) {
   return function createPipeline () {
     var pipeline = new Pipeline();
     pipeline.
-        withStep(new BuildNavigationPlanStep).
-        withStep(new LoadNewComponentsStep).
-        withStep(new CommitChangesStep);
+        withStep(new BuildNavigationPlanStep()).
+        withStep(new LoadNewComponentsStep()).
+        withStep(new CommitChangesStep());
     return pipeline;
   };
 
-}]).
+}).
 
-factory('router', function (createPipeline) {
-  var History = require('router/dist/cjs/history').History;
+factory('componentLoader', function ($http) {
+  return {
+    loadComponent: function (options) {
+      var url = this.getFullUrl(options.componentUrl)
+      return new Promise(function (resolve, reject) {
+        $http.get(url).then(function (data) {
+
+          // TODO: figure out what this API should look like;
+          // should this also be responsible for instantiating the ctrl
+          var componentInstance = {
+            template: data,
+            executionContext: {}
+          };
+          resolve(componentInstance);
+
+        }, reject);
+      });
+    },
+    getFullUrl: function (componentUrl) {
+      return componentUrl + '/component.html';
+    }
+  }
+}).
+
+factory('history', function ($location) {
+  return {
+    navigate: function (path) {
+      $location.url(path);
+      return this.options.routeHandler ?
+          this.options.routeHandler(path) :
+          false;
+    },
+    options: {}
+  }
+}).
+
+factory('router', function (createPipeline, $location, history, $rootScope) {
   var Router = require('router/dist/cjs/router').Router;
 
   // TODO: use $location instead of History
-  var history = new History();
   var router = new Router(history);
+
 
   router.activate = function (options) {
     if (this.isActive) {
@@ -56,9 +81,13 @@ factory('router', function (createPipeline) {
     }
 
     this.isActive = true;
-    this.options = extend({ routeHandler: this.loadUrl.bind(this) }, this.options, options);
-    this.history.activate(this.options);
+    this.options = extend({
+      routeHandler: this.loadUrl.bind(this)
+    }, this.options, options);
+    history.options.routeHandler = this.options.routeHandler;
+
     this.dequeueInstruction();
+    document.addEventListener('click', handleLinkClick, true);
   };
 
   router.loadUrl = function (url) {
@@ -81,7 +110,8 @@ factory('router', function (createPipeline) {
 
   router.deactivate = function () {
     this.isActive = false;
-    this.history.deactivate();
+    //this.history.deactivate();
+    document.removeEventListener('click', handleLinkClick, true);
   };
 
   router.queueInstruction = function (instruction) {
@@ -131,45 +161,53 @@ factory('router', function (createPipeline) {
     }.bind(this));
   }
 
-  document.addEventListener('click', handleLinkClick.bind(router), true);
+  function handleLinkClick(ev) {
+    if (!router.isActive) {
+      return;
+    }
+
+    var target = ev.target;
+    if (target.tagName != 'A') {
+      return;
+    }
+
+    if (!ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && targetIsThisWindow(target)) {
+      var href = target.getAttribute('href');
+
+      // Ensure the protocol is not part of URL, meaning its relative.
+      // Stop the event bubbling to ensure the link will not cause a page refresh.
+      if (href != null && !(href.charAt(0) === "#" || (/^[a-z]+:/i).test(href))) {
+        ev.preventDefault();
+        $rootScope.$apply(function () {
+          router.history.navigate(href);
+        });
+      }
+    }
+  }
 
   return router;
 }).
 
 directive('routerViewPort', function ($location, router) {
-
-  var log = console.log.bind(console);
-
-  var elts = [];
-
-  router.registerViewPort({
-    process: function (command) {
-      log(command);
-      log(elts)
-      elts.forEach(function (elt) {
-        elt.html('look it did something');
-      });
-    },
-    getComponent: function (opts) {
-      //log(opts);
-      return opts
-    }
-  });
-
-  router.configure(function (config) {
-    config.title = 'Router Demo';
-
-    config.map([
-      { pattern: ['','foo'],   componentUrl: 'foo',   nav: true, title: 'Home' },
-      { pattern: 'bar',        componentUrl: 'bar',   nav: true }
-    ]);
-  });
-
   return {
     restrict: 'AE',
-    link: function (scope, elt) {
-      elts.push(elt);
-      router.activate({ pushState: true });
+    link: function (scope, elt, attrs) {
+      router.registerViewPort({
+        process: function (command) {
+          elt.html('look it did something: ' + JSON.stringify({
+            name     : command.name,
+            strategy : command.strategy //,
+            //lifecycle: command.lifecycleArgs
+          }));
+          log(command);
+        },
+        getComponent: function (opts) {
+          //log(opts);
+          return opts
+        }
+      }, attrs.routerViewPort);
+
+      router.activate();
     }
   };
 });
@@ -256,30 +294,6 @@ function resolveComponentView(componentLoader, router, viewPortPlan) {
 
 // utils
 // -----
-
-function handleLinkClick(ev) {
-  if (!this.isActive) {
-    return;
-  }
-
-  var target = ev.target;
-  if (target.tagName != 'A') {
-    return;
-  }
-
-  if (this.history._hasPushState) {
-    if (!ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && targetIsThisWindow(target)) {
-      var href = target.getAttribute('href');
-
-      // Ensure the protocol is not part of URL, meaning its relative.
-      // Stop the event bubbling to ensure the link will not cause a page refresh.
-      if (href != null && !(href.charAt(0) === "#" || (/^[a-z]+:/i).test(href))) {
-        ev.preventDefault();
-        this.history.navigate(href);
-      }
-    }
-  }
-}
 
 function targetIsThisWindow(target) {
   var targetWindow = target.getAttribute('target');
