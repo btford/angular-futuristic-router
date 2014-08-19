@@ -42,7 +42,7 @@ factory('componentLoader', function ($http) {
           // TODO: figure out what this API should look like;
           // should this also be responsible for instantiating the ctrl
           var componentInstance = {
-            template: data,
+            template: data.data,
             executionContext: {}
           };
           resolve(componentInstance);
@@ -194,12 +194,16 @@ directive('routerViewPort', function ($location, router) {
     link: function (scope, elt, attrs) {
       router.registerViewPort({
         process: function (command) {
-          elt.html('look it did something: ' + JSON.stringify({
-            name     : command.name,
-            strategy : command.strategy //,
-            //lifecycle: command.lifecycleArgs
-          }));
           log(command);
+          if (command.component.template) {
+            elt.html(command.component.template);
+          } else {
+            elt.html('look it did something: ' + JSON.stringify({
+              name     : command.name,
+              strategy : command.strategy //,
+              //lifecycle: command.lifecycleArgs
+            }));
+          }
         },
         getComponent: function (opts) {
           //log(opts);
