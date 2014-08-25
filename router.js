@@ -35,19 +35,15 @@ factory('createPipeline', function ($http, componentLoader) {
 factory('componentLoader', function ($http) {
   return {
     loadComponent: function (options) {
-      var url = this.getFullUrl(options.componentUrl)
-      return new Promise(function (resolve, reject) {
-        $http.get(url).then(function (data) {
-
-          // TODO: figure out what this API should look like;
-          // should this also be responsible for instantiating the ctrl
-          var componentInstance = {
-            template: data.data,
-            executionContext: {}
-          };
-          resolve(componentInstance);
-
-        }, reject);
+      var url = this.getFullUrl(options.componentUrl);
+      return $http.get(url).then(function (data) {
+        // TODO: figure out what this API should look like;
+        // should this also be responsible for instantiating the ctrl
+        return componentInstance = {
+          template: data.data,
+          controller: 'MyController',
+          executionContext: {}
+        };
       });
     },
     getFullUrl: function (componentUrl) {
@@ -188,7 +184,7 @@ factory('router', function (createPipeline, $location, history, $rootScope) {
   return router;
 }).
 
-directive('routerViewPort', function ($location, router) {
+directive('routerViewPort', function ($location, router, $compile, $controller) {
   return {
     restrict: 'AE',
     link: function (scope, elt, attrs) {
@@ -196,7 +192,15 @@ directive('routerViewPort', function ($location, router) {
         process: function (command) {
           log(command);
           if (command.component.template) {
-            elt.html(command.component.template);
+            var template = angular.element(command.component.template);
+            var childScope = scope.$new();
+            var link = $compile(template);
+            $controller(command.component.controller, { $scope: childScope });
+            link(childScope);
+            // TODO: controllerAs
+            elt.html('');
+            elt.append(template);
+            childScope.$apply();
           } else {
             elt.html('look it did something: ' + JSON.stringify({
               name     : command.name,
