@@ -11,5 +11,9 @@
   "dependencies": {
     "angular-router": "0.0.2",
     "router": "git://github.com/angular/router"
+  },
+  "devDependencies": {
+    "falafel": "^0.3.1",
+    "through": "^2.3.4"
   }
 }
